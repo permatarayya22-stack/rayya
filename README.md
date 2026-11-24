@@ -1,6 +1,6 @@
 # 🏡 KOSPACE — Sistem Administrasi Pengelolaan Kos
 
-Aplikasi administrasi kos untuk **satu pengguna (pemilik kos)** tanpa login. Dibangun dengan **Python**, **Streamlit**, dan **SQLite**, dijalankan secara lokal melalui terminal VS Code.
+Aplikasi administrasi kos dengan **login multi-pengguna** (akun dibuat admin atau daftar mandiri dengan kode undangan). Data operasional disimpan di **SQLite**, sedangkan akun pengguna disimpan di **Supabase Postgres** dengan password ter-hash **Argon2id**. Dibangun dengan **Python** dan **Streamlit**.
 
 Seluruh antarmuka menggunakan **Bahasa Indonesia**. Penghuni tidak memiliki akses ke aplikasi; pencatatan dilakukan sepenuhnya oleh pemilik kos.
 
@@ -16,7 +16,8 @@ Seluruh antarmuka menggunakan **Bahasa Indonesia**. Penghuni tidak memiliki akse
 | 📄 **Sewa** | Daftar kontrak, pembuatan sewa dengan deteksi bentrok, detail tagihan per periode, catat pembayaran, akhiri sewa, ubah tanggal/harga, dan hapus dengan pengaman B10. |
 | 💳 **Pembayaran** | Daftar tagihan per periode dengan status otomatis, pencatatan pembayaran, riwayat transaksi, detail pembayaran, dan koreksi/hapus pembayaran. |
 | 🕘 **Riwayat** | Riwayat per penghuni, riwayat per kamar, linimasa transaksi, dan log aktivitas sistem. |
-| ⚙️ **Pengaturan** | Informasi database, muat ulang data contoh, hapus transaksi, bersihkan penghuni, reset total, ekspor CSV/ZIP, dokumentasi aturan bisnis, dan profil tim. |
+| ⚙️ **Pengaturan** | Informasi database, muat ulang data contoh, hapus transaksi, bersihkan penghuni, reset total, ekspor CSV/ZIP, dokumentasi aturan bisnis, kelola akun pengguna (khusus admin), dan profil tim. |
+| 🔐 **Masuk & Daftar** | Tab **Masuk** dengan username/password dan tab **Daftar** dengan kode undangan (akun baru otomatis Pengelola). Sesi disimpan di `st.session_state` dan tombol keluar ada di sidebar. |
 
 Fitur pendukung:
 
@@ -36,6 +37,8 @@ Fitur pendukung:
 - **Python 3.10+** (diuji pada Python 3.14)
 - **Streamlit** 1.50+ (diuji pada 1.63)
 - **SQLite** (modul bawaan Python)
+- **Supabase Postgres** + **psycopg** 3.2+ (tabel pengguna)
+- **Argon2id** + **argon2-cffi** (hashing password)
 - **pandas** 2.0+ (tabel dan ekspor CSV)
 - **Altair** 5.0+ (grafik bawaan Streamlit)
 
@@ -91,9 +94,38 @@ Tekan `Ctrl + C` di terminal.
 
 ---
 
+## 🔐 Login & akun pengguna
+
+1. Buat project di [Supabase](https://supabase.com), lalu salin connection string **Session Pooler** (IPv4) dari Dashboard > Connect.
+2. Salin `.streamlit/secrets.toml.example` menjadi `.streamlit/secrets.toml`, lalu isi `DATABASE_URL`, `ADMIN_USERNAME`, dan `ADMIN_PASSWORD`. Di Streamlit Community Cloud, isi nilai yang sama di **Settings > Secrets**. Alternatif: jalankan `.venv\Scripts\python scripts\isi_secrets.py` lalu tempel connection string dan ikuti prompt (password DB akan di-URL-encode otomatis).
+3. Saat aplikasi dijalankan dan tabel `users` masih kosong, akun admin pertama dibuat otomatis dari `ADMIN_USERNAME` / `ADMIN_PASSWORD` (password minimal 12 karakter).
+4. Setelah masuk, admin dapat menambah akun, mereset password, dan menonaktifkan akun di **Pengaturan > Pengguna**.
+5. Lima percobaan login gagal berturut-turut membuat akun terkunci selama 15 menit.
+6. Password disimpan sebagai hash Argon2id (parameter `t=3, m=64 MiB, p=4`); password asli tidak pernah disimpan.
+
+### Pendaftaran mandiri (tab Daftar)
+
+- Isi `SIGNUP_CODE` di secrets untuk mengaktifkan tab **Daftar** pada halaman login. Tanpa `SIGNUP_CODE`, tab tetap tampil tetapi menampilkan pesan bahwa pendaftaran dinonaktifkan.
+- Pengelola baru mendaftar dengan username, password (minimal 12 karakter), dan kode undangan. Kode dibandingkan secara aman (`hmac.compare_digest`).
+- Akun hasil pendaftaran selalu berperan **Pengelola** (non-admin). Admin tetap dapat menonaktifkan atau mereset password akun tersebut di **Pengaturan > Pengguna**.
+- Setelah berhasil daftar, pengguna diarahkan kembali ke tab Masuk dengan username terisi.
+
+### Mode demo lokal (SQLite)
+
+- Untuk demo tanpa Supabase, isi `DATABASE_URL = "sqlite:///kospace_auth.db"` di secrets.
+- Halaman login menampilkan kartu **Akun demo** berisi username dan password dari `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+- Kartu itu hanya muncul jika password di secrets masih cocok dengan hash di database. Bila password diganti lewat **Pengaturan > Pengguna**, kartu disembunyikan agar tidak menampilkan kredensial yang salah.
+- Kartu demo tidak pernah muncul saat memakai Supabase, sehingga aman untuk produksi.
+- Tab **Daftar** ikut menampilkan kartu **Kode undangan demo** berisi nilai `SIGNUP_CODE`, juga hanya pada mode SQLite.
+
+> File `.streamlit/secrets.toml` sudah masuk `.gitignore`. Jangan commit kredensial asli.
+
+---
+
 ## 💾 Database
 
-- Lokasi: `kospace.db` di folder proyek yang sama dengan `app.py`.
+- Lokasi SQLite: `kospace.db` di folder proyek yang sama dengan `app.py`.
+- Tabel `users` berada di Supabase Postgres agar akun tetap ada saat Streamlit Cloud reboot/redeploy.
 - Format tanggal di database: **YYYY-MM-DD**.
 - Format tanggal di tampilan: **DD-MM-YYYY**.
 - Foreign key SQLite selalu diaktifkan (`PRAGMA foreign_keys = ON`).
@@ -270,7 +302,7 @@ KOSPACE FINAL/
 
 ## 🔒 Batasan versi ini
 
-- Tanpa login dan tanpa akses untuk penghuni.
+- Penghuni tidak memiliki akses; pendaftaran akun hanya dengan kode undangan dari admin.
 - Belum ada pembayaran online.
 - Belum ada deposit, token listrik, kuitansi, atau pengingat WhatsApp.
 - Belum ada deployment ke internet; aplikasi dirancang untuk berjalan lokal.

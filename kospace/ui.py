@@ -285,6 +285,39 @@ div[data-testid="stToast"] {border-radius:12px;}
 .stAlert {border-radius:12px;}
 [data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label > div:first-child {display:none;}
 
+/* Login */
+.ks-login-brand {
+  background:#fff; border-radius:18px; padding:16px 22px; max-width:320px;
+  margin:7vh auto 20px; display:flex; align-items:center; justify-content:center;
+  box-shadow: 0 18px 40px rgba(6,43,41,.16);
+}
+.ks-login-brand img {width:100%; max-width:230px; height:auto; display:block;}
+.ks-login-title {
+  text-align:center; font-size:25px; font-weight:800; color:#0f172a;
+  letter-spacing:-.5px; margin:0;
+}
+.ks-login-sub {text-align:center; color:#64748b; font-size:13px; margin:6px 0 18px;}
+.ks-login-footer {text-align:center; color:#94a3b8; font-size:11px; margin-top:18px;}
+
+/* Kartu akun demo (mode preview lokal) */
+.ks-demo {
+  background:#fffbeb; border:1px dashed #fbbf24; border-radius:14px;
+  padding:12px 16px; margin:0 0 16px;
+}
+.ks-demo-title {
+  font-size:10.5px; font-weight:800; letter-spacing:1px; text-transform:uppercase;
+  color:#b45309; margin-bottom:6px;
+}
+.ks-demo-row {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:4px 0; font-size:12.5px; color:#475569;
+}
+.ks-demo-row code {
+  background:#fff; border:1px solid #fde68a; border-radius:7px; padding:2px 9px;
+  font-size:12.5px; font-weight:700; color:#0f172a;
+}
+.ks-demo-note {font-size:11px; color:#a16207; margin-top:7px; line-height:1.5;}
+
 @media (max-width: 760px) {
   .ks-header h1 {font-size:24px;}
   .ks-hero {padding:20px;}

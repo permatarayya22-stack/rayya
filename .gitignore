@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.streamlit/secrets.toml
+kospace_auth.db

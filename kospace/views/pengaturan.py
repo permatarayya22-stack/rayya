@@ -2,15 +2,32 @@
 
 import io
 import zipfile
+from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
-from .. import db, logic, ui
+from .. import auth, db, logic, ui
 
 
 def _csv(rows: list[dict]) -> bytes:
     return pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
+
+
+def _fmt_auth_time(value) -> str:
+    """Timestamp auth disimpan dalam UTC; tampilkan dalam zona waktu lokal."""
+    if value in (None, ""):
+        return "-"
+    if isinstance(value, datetime):
+        waktu = value
+    else:
+        try:
+            waktu = datetime.fromisoformat(str(value)[:19])
+        except ValueError:
+            return str(value)
+    if waktu.tzinfo is None:
+        waktu = waktu.replace(tzinfo=timezone.utc)
+    return waktu.astimezone().strftime("%d-%m-%Y %H:%M")
 
 
 def _zip_semua() -> bytes:
@@ -68,8 +85,118 @@ def _zip_semua() -> bytes:
     return buffer.getvalue()
 
 
+def _render_users(admin: dict) -> None:
+    ui.section("Akun pengguna", "Kelola akses masuk ke KOSPACE")
+    sumber = (
+        "SQLite lokal (mode preview)"
+        if auth.is_local_preview()
+        else "Supabase Postgres"
+    )
+    st.caption(
+        f"Akun tersimpan di {sumber}. Password di-hash dengan Argon2id dan "
+        f"minimal {auth.MIN_PASSWORD} karakter."
+    )
+    if auth.signup_enabled():
+        st.caption(
+            "Pendaftaran mandiri **aktif** — bagikan kode undangan (SIGNUP_CODE) "
+            "hanya kepada pengelola yang berhak. Akun hasil pendaftaran berperan Pengelola."
+        )
+    else:
+        st.caption(
+            "Pendaftaran mandiri **nonaktif** — isi SIGNUP_CODE di Secrets "
+            "untuk mengaktifkan halaman Daftar."
+        )
+
+    with st.expander("Tambah pengguna baru"):
+        with st.form("form_user_add", clear_on_submit=True):
+            kiri, tengah, kanan = st.columns([1.2, 1.2, 0.8])
+            with kiri:
+                username = st.text_input("Username")
+            with tengah:
+                password = st.text_input("Password awal", type="password")
+            with kanan:
+                is_admin = st.checkbox("Admin")
+            simpan = st.form_submit_button("Buat akun", type="primary")
+        if simpan:
+            try:
+                auth.create_user(username, password, is_admin)
+            except auth.AuthError as exc:
+                st.error(str(exc))
+            except Exception:
+                st.error("Gagal membuat akun. Periksa koneksi database.")
+            else:
+                ui.flash("success", "Akun pengguna berhasil dibuat.")
+                st.rerun()
+
+    try:
+        rows = auth.list_users()
+    except Exception:
+        st.error("Tidak bisa memuat daftar pengguna. Periksa koneksi database.")
+        return
+
+    st.dataframe(
+        [
+            {
+                "Username": row["username"],
+                "Peran": "Admin" if row["is_admin"] else "Pengelola",
+                "Status": "Aktif" if row["is_active"] else "Nonaktif",
+                "Dibuat": _fmt_auth_time(row["created_at"]),
+                "Login terakhir": _fmt_auth_time(row["last_login_at"]),
+            }
+            for row in rows
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+
+    kiri, kanan = st.columns(2)
+
+    with kiri:
+        with st.container(border=True):
+            st.markdown("**Reset password**")
+            target = st.selectbox(
+                "Akun", [row["username"] for row in rows], key="user_reset_target"
+            )
+            sandi_baru = st.text_input(
+                "Password baru", type="password", key="user_reset_password"
+            )
+            if st.button("Simpan password baru", key="btn_user_reset"):
+                try:
+                    auth.reset_password(target, sandi_baru)
+                except auth.AuthError as exc:
+                    st.error(str(exc))
+                except Exception:
+                    st.error("Gagal menyimpan password baru. Periksa koneksi database.")
+                else:
+                    ui.flash("success", f"Password {target} berhasil diperbarui.")
+                    st.rerun()
+
+    with kanan:
+        with st.container(border=True):
+            st.markdown("**Aktif / nonaktifkan akun**")
+            st.caption("Akun yang sedang dipakai tidak bisa diubah dari sini.")
+            lain = [row for row in rows if row["username"] != admin.get("username")]
+            if not lain:
+                st.caption("Belum ada akun lain.")
+            else:
+                pilihan = st.selectbox(
+                    "Akun", [row["username"] for row in lain], key="user_active_target"
+                )
+                data = next(row for row in lain if row["username"] == pilihan)
+                label = "Nonaktifkan akun" if data["is_active"] else "Aktifkan akun"
+                if st.button(label, key="btn_user_active"):
+                    try:
+                        auth.set_user_active(data["id"], not data["is_active"])
+                    except Exception:
+                        st.error("Gagal mengubah status akun. Periksa koneksi database.")
+                    else:
+                        ui.flash("success", f"Status akun {pilihan} diperbarui.")
+                        st.rerun()
+
+
 def render() -> None:
     info = db.database_info()
+    user = auth.current_user() or {}
     ui.page_header("⚙️", "Pengaturan", "Database, ekspor data, dan aturan bisnis KOSPACE")
     ui.show_flash()
 
@@ -98,14 +225,16 @@ def render() -> None:
         ui.stat_card("Pembayaran", str(info["pembayaran"]), "Baris pada tabel pembayaran", "💳", "green")
 
     st.write("")
-    tab_db, tab_ekspor, tab_aturan, tab_tentang = ui.tabbed(
-        "Pengaturan", ["🗄️ Database", "⬇️ Ekspor data", "📖 Aturan bisnis", "ℹ️ Tentang"]
-    )
+    labels = ["🗄️ Database", "⬇️ Ekspor data", "📖 Aturan bisnis"]
+    if user.get("is_admin"):
+        labels.append("👥 Pengguna")
+    labels.append("ℹ️ Tentang")
+    tabs = dict(zip(labels, ui.tabbed("Pengaturan", labels)))
 
     # ------------------------------------------------------------------
     # DATABASE
     # ------------------------------------------------------------------
-    with tab_db:
+    with tabs["🗄️ Database"]:
         ui.section("Pemeliharaan database", "Semua tindakan di bawah bersifat permanen")
         kiri, kanan = st.columns(2)
 
@@ -186,7 +315,7 @@ def render() -> None:
     # ------------------------------------------------------------------
     # EKSPOR
     # ------------------------------------------------------------------
-    with tab_ekspor:
+    with tabs["⬇️ Ekspor data"]:
         ui.section("Ekspor data", "Unduh CSV (UTF-8) untuk diolah di Excel atau alat lain")
         st.download_button(
             "🗂️ Unduh semua data (ZIP berisi 5 CSV)",
@@ -286,7 +415,7 @@ def render() -> None:
     # ------------------------------------------------------------------
     # ATURAN
     # ------------------------------------------------------------------
-    with tab_aturan:
+    with tabs["📖 Aturan bisnis"]:
         ui.section("Aturan bisnis KOSPACE", "Rujukan lengkap perilaku sistem")
         with st.expander("🔑 B01 — Nomor kamar unik", expanded=True):
             st.markdown(
@@ -359,15 +488,22 @@ def render() -> None:
             )
 
     # ------------------------------------------------------------------
+    # PENGGUNA (khusus admin)
+    # ------------------------------------------------------------------
+    if "👥 Pengguna" in tabs:
+        with tabs["👥 Pengguna"]:
+            _render_users(user)
+
+    # ------------------------------------------------------------------
     # TENTANG
     # ------------------------------------------------------------------
-    with tab_tentang:
+    with tabs["ℹ️ Tentang"]:
         ui.section("Tentang KOSPACE", "Sistem Administrasi Pengelolaan Kos")
         st.markdown(
             """
             <div class="ks-panel" style="margin-bottom:14px;">
               <div class="ks-panel-title" style="font-size:18px;">🏡 KOSPACE</div>
-              <div class="ks-panel-sub" style="margin-bottom:10px;">Sistem administrasi kos putri · tanpa login</div>
+              <div class="ks-panel-sub" style="margin-bottom:10px;">Sistem administrasi kos · akses pengelola</div>
               <div style="font-size:13px;color:#475569;line-height:1.7;">
                 KOSPACE membantu pemilik kos mengelola data kamar, identitas penghuni, masa sewa, dan
                 pembayaran dalam satu sistem. Dibangun dengan <b>Python</b>, <b>Streamlit</b>, dan
@@ -393,6 +529,7 @@ def render() -> None:
                   <li>Pembayaran per periode + status otomatis</li>
                   <li>Riwayat dan detail transaksi</li>
                   <li>Pencegahan jadwal sewa bertabrakan</li>
+                  <li>Masuk dan daftar akun dengan kode undangan</li>
                 </ul>
                 """,
             )
@@ -402,7 +539,8 @@ def render() -> None:
                 "Di luar lingkup versi ini",
                 """
                 <ul style="font-size:12.5px;color:#475569;line-height:1.8;padding-left:18px;margin:0;">
-                  <li>Belum ada login dan pemesanan mandiri</li>
+                  <li>Pendaftaran terbuka tanpa kode undangan</li>
+                  <li>Belum ada pemesanan mandiri</li>
                   <li>Belum ada pembayaran online</li>
                   <li>Belum ada deposit dan token listrik</li>
                   <li>Belum ada kuitansi dan pengingat WhatsApp</li>

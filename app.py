@@ -21,10 +21,11 @@ st.set_page_config(
 
 _LOGO_B64 = base64.b64encode((_ASSETS / "kospace-logo.png").read_bytes()).decode("ascii")
 
-from kospace import db, logic, ui  # noqa: E402
+from kospace import auth, db, logic, ui  # noqa: E402
 from kospace.views import (  # noqa: E402
     dashboard,
     kamar,
+    login,
     pembayaran,
     pengaturan,
     penghuni,
@@ -101,13 +102,16 @@ def _sidebar() -> str:
             unsafe_allow_html=True,
         )
 
+        user = auth.current_user() or {}
+        peran = "Admin" if user.get("is_admin") else "Pengelola"
+        inisial = ui.esc((user.get("username") or "?")[:1].upper())
         st.markdown(
-            """
+            f"""
             <div class="ks-owner">
-              <div class="ks-owner-avatar">👩</div>
+              <div class="ks-owner-avatar">{inisial}</div>
               <div>
-                <div class="ks-owner-name">Pemilik Kos</div>
-                <div class="ks-owner-role">Mode tanpa login</div>
+                <div class="ks-owner-name">{ui.esc(user.get('username', ''))}</div>
+                <div class="ks-owner-role">{peran} · sesi aktif</div>
               </div>
             </div>
             <div style="font-size:10px;color:#5eead4;letter-spacing:.4px;padding:8px 2px 2px;">
@@ -116,6 +120,10 @@ def _sidebar() -> str:
             """,
             unsafe_allow_html=True,
         )
+
+        if st.button("Keluar", key="btn_logout", width="stretch"):
+            auth.logout()
+            st.rerun()
 
         st.markdown(
             f"<div style='font-size:10px;color:#6ee7b7;padding-top:10px;'>📅 {ui.esc(ui.today_label())}</div>",
@@ -127,6 +135,12 @@ def _sidebar() -> str:
 def main() -> None:
     logic.bootstrap()
     ui.inject_css()
+    auth.bootstrap()
+
+    if not auth.is_logged_in():
+        login.render()
+        return
+
     _siapkan_navigasi()
     pilihan = _sidebar()
 
